@@ -19,25 +19,31 @@ private var deallocatedSubjectTriggerContext: UInt8 = 0
 private var deallocatedSubjectContext: UInt8 = 0
 
 #if !DISABLE_SWIZZLING && !os(Linux)
-	
+
+// Dealloc
+@discardableResult
+public func onDeallocated(_ base: AnyObject, action: @escaping () -> Void) -> Cancellation {
+	synchronized(on: base) {
+		let id = UUID()
+		if let deallocObserver = objc_getAssociatedObject(base, &deallocatedSubjectContext) as? DeallocObserver {
+			deallocObserver.actions[id] = action
+			return Cancellation { deallocObserver.actions[id] = nil }
+		}
+		
+		let deallocObserver = DeallocObserver()
+		deallocObserver.actions[id] = action
+		
+		objc_setAssociatedObject(base, &deallocatedSubjectContext, deallocObserver, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+		return Cancellation { deallocObserver.actions[id] = nil }
+	}
+}
+
 extension NSObjectProtocol {
 	
 	// Dealloc
 	@discardableResult
 	public func onDeallocated(action: @escaping () -> Void) -> Cancellation {
-		synchronized(on: self) {
-			let id = UUID()
-			if let deallocObserver = objc_getAssociatedObject(self, &deallocatedSubjectContext) as? DeallocObserver {
-				deallocObserver.actions[id] = action
-				return Cancellation { deallocObserver.actions[id] = nil }
-			}
-			
-			let deallocObserver = DeallocObserver()
-			deallocObserver.actions[id] = action
-			
-			objc_setAssociatedObject(self, &deallocatedSubjectContext, deallocObserver, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-			return Cancellation { deallocObserver.actions[id] = nil }
-		}
+		NSMethodsObservation.onDeallocated(self, action: action)
 	}
 	
 	@discardableResult
